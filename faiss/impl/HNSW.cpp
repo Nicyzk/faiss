@@ -110,8 +110,17 @@ void HNSW::print_neighbor_stats(int level) const {
            level,
            nb_neighbors(level));
     size_t tot_neigh = 0, tot_common = 0, tot_reciprocal = 0, n_node = 0;
-#pragma omp parallel for reduction(+ : tot_neigh) reduction(+ : tot_common) \
+
+    int nthreads = omp_get_max_threads();
+    std::vector<std::unordered_map<size_t, size_t>> out_degree_maps(nthreads);
+
+#pragma omp parallel reduction(+ : tot_neigh) reduction(+ : tot_common) \
         reduction(+ : tot_reciprocal) reduction(+ : n_node)
+{
+    int tid = omp_get_thread_num();
+    auto &out_degree_map = out_degree_maps[tid];
+
+    #pragma omp for
     for (int i = 0; i < levels.size(); i++) {
         if (levels[i] > level) {
             n_node++;
@@ -125,6 +134,8 @@ void HNSW::print_neighbor_stats(int level) const {
                 neighset.insert(neighbors[j]);
             }
             int n_neigh = neighset.size();
+            out_degree_map[n_neigh]++;
+
             int n_common = 0;
             int n_reciprocal = 0;
             for (size_t j = begin; j < end; j++) {
@@ -155,6 +166,20 @@ void HNSW::print_neighbor_stats(int level) const {
             tot_reciprocal += n_reciprocal;
         }
     }
+} // End of parallel block
+
+    // merge out-degree maps
+    std::unordered_map<size_t, size_t> out_degree_combined;
+    for (auto &m: out_degree_maps) {
+        for (auto &kv: m) {
+            out_degree_combined[kv.first] += kv.second;
+        }
+    }
+    printf("out_degree,cnt\n");
+    for (auto &kv: out_degree_combined) {
+        printf("%ld,%ld\n", kv.first, kv.second);
+    }
+
     float normalizer = n_node;
     printf("   nb of nodes at that level %zd\n", n_node);
     printf("   neighbors per node: %.2f (%zd)\n",

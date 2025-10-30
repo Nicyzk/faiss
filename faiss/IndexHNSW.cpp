@@ -343,6 +343,7 @@ void IndexHNSW::add(idx_t n, const float* x) {
     ntotal = storage->ntotal;
 
     hnsw_add_vertices(*this, n0, n, x, verbose, hnsw.levels.size() == ntotal);
+    hnsw.print_neighbor_stats(0);
 }
 
 void IndexHNSW::reset() {
