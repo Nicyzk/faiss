@@ -339,11 +339,48 @@ void IndexHNSW::add(idx_t n, const float* x) {
             "Please use IndexHNSWFlat (or variants) instead of IndexHNSW directly");
     FAISS_THROW_IF_NOT(is_trained);
     int n0 = ntotal;
+
+    // 1. Quantize and store in underlying index
     storage->add(n, x);
     ntotal = storage->ntotal;
 
+    // 2. Resize and Reconstruct
+    size_t dim = this->d;
+    hnsw.node_reconstructed_values.resize(ntotal * dim);
+
+    // Decode (reconstruct) the vectors we just added
+    // n0 is the starting ID of the new vectors
+    storage->reconstruct_n(n0, n, hnsw.node_reconstructed_values.data() + n0 * dim);
+
+    // [DEBUG PRINT COMPARISON START] ========================================
+    printf("\n[DEBUG] Comparing Pre-Quantized (Orig) vs Post-Quantized (Recons):\n");
+    int num_to_print = (n < 5) ? n : 5; // Check first 5 vectors
+    int dims_to_print = (dim < 5) ? dim : 5; // Check first 5 dims
+
+    for (int i = 0; i < num_to_print; i++) {
+        idx_t current_id = n0 + i;
+        printf("Vector ID %ld:\n", current_id);
+        
+        // Pointers to the start of vector i in both arrays
+        const float* vec_orig = x + i * dim; 
+        const float* vec_recons = hnsw.node_reconstructed_values.data() + current_id * dim;
+
+        printf("  Idx | Original   | Reconstructed | Diff\n");
+        printf("  ----|------------|---------------|-------\n");
+        
+        for (int j = 0; j < dims_to_print; j++) {
+            float v1 = vec_orig[j];
+            float v2 = vec_recons[j];
+            float diff = v1 - v2;
+            printf("  %3d | %10.5f | %13.5f | %8.5f\n", j, v1, v2, diff);
+        }
+        if (dim > dims_to_print) printf("  ... (dims truncated)\n");
+    }
+    printf("[DEBUG] Finished comparison.\n\n");
+    // [DEBUG PRINT COMPARISON END] ==========================================
+
+    // 3. Build HNSW Graph
     hnsw_add_vertices(*this, n0, n, x, verbose, hnsw.levels.size() == ntotal);
-    hnsw.print_neighbor_stats(0);
 }
 
 void IndexHNSW::reset() {

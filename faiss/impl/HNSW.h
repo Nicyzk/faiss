@@ -124,6 +124,12 @@ struct HNSW {
     /// for all levels. this is where all storage goes.
     MaybeOwnedVector<storage_idx_t> neighbors;
 
+    // [MODIFICATION START] --------------------------------------
+    // Buffer to store the reconstructed vectors (flattened)
+    // Layout: [vector_0_component_0, vector_0_component_1, ..., vector_1_component_0, ...]
+    // Size: ntotal * d
+    std::vector<float> node_reconstructed_values;
+
     /// entry point in the search structure (one of the points with maximum
     /// level
     storage_idx_t entry_point = -1;

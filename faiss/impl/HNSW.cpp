@@ -15,6 +15,7 @@
 #include <faiss/impl/ResultHandler.h>
 #include <faiss/utils/prefetch.h>
 
+#include <unordered_map>
 #ifdef __AVX2__
 #include <immintrin.h>
 
@@ -959,6 +960,7 @@ int extract_k_from_ResultHandler(ResultHandler<C>& res) {
 
 } // namespace
 
+// TODO: change this function to do two level search 
 HNSWStats HNSW::search(
         DistanceComputer& qdis,
         ResultHandler<C>& res,
