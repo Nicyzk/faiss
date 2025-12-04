@@ -22,6 +22,16 @@
 
 namespace faiss {
 
+struct Pruning {
+    bool to_prune = false;
+    int M = 32;
+    int m = 16;
+    float alpha = 0.1f;
+    std::vector<bool> is_hub_node;
+};
+
+extern Pruning pruning;
+
 /** Implementation of the Hierarchical Navigable Small World
  * datastructure.
  *

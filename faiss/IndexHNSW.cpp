@@ -8,6 +8,7 @@
 #include <faiss/IndexHNSW.h>
 
 #include <omp.h>
+#include <algorithm>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
@@ -20,6 +21,7 @@
 
 #include <cstdint>
 #include "faiss/Index.h"
+#include "impl/HNSW.h"
 
 #include <faiss/Index2Layer.h>
 #include <faiss/IndexFlat.h>
@@ -333,6 +335,87 @@ void IndexHNSW::range_search(
     }
 }
 
+static void set_hub_nodes(HNSW &hnsw, size_t ntotal) {
+    std::vector<std::pair<size_t, int>> degrees;
+    degrees.reserve(ntotal);
+    for (size_t i = 0; i < ntotal; i++) {
+        size_t begin, end;
+        hnsw.neighbor_range(i, 0, &begin, &end);
+        int count = 0;
+        for(size_t j = begin; j < end; ++j) {
+            if(hnsw.neighbors[j] != -1) count++;
+        }
+        degrees.emplace_back(i, count);
+    }
+
+    std::sort(degrees.begin(), degrees.end(), 
+        [](const auto &a, const auto &b) { return a.second > b.second; });
+    
+    pruning.is_hub_node.assign(ntotal, false);
+    size_t threshold_count = (size_t)(ntotal * pruning.alpha);
+
+    for(size_t i = 0; i < threshold_count && i < degrees.size(); ++i) {
+        pruning.is_hub_node[degrees[i].first] = true;
+    }
+}
+
+// Note: this will NOT work if we are adding to an existing index!!
+void hnsw_rebuild_l0(
+        IndexHNSW& index,
+        HNSW& copy_hnsw,
+        size_t n0,
+        size_t n,
+        const float *x) {
+    size_t d = index.d;
+    size_t ntotal = n0 + n;
+    
+    // 1. Setup Locks for the COPY index
+    std::vector<omp_lock_t> locks(ntotal);
+    for (int i = 0; i < ntotal; i++) {
+        omp_init_lock(&locks[i]);
+    }
+
+    std::vector<int> order(n);
+    for (int i = 0; i < n; i++) {
+        order[i] = i;
+    }
+
+    // shuffle nodes
+    RandomGenerator rng2(789);
+    for (int i = 0; i < n; i++) {
+        std::swap(order[i], order[i + rng2.rand_int(n - i)]);
+    }
+
+    #pragma omp parallel
+    {
+        VisitedTable vt(ntotal);
+        
+        // Use the distance computer from the storage
+        std::unique_ptr<DistanceComputer> dis(
+                storage_distance_computer(index.storage));
+
+        #pragma omp for schedule(dynamic) 
+        for (int i = 0; i < n; i++) {
+            storage_idx_t pt_id = order[i];
+            dis->set_query(x + (pt_id - n0) * d);
+
+            copy_hnsw.add_with_locks(
+                *dis,
+                0, 
+                pt_id,
+                locks,
+                vt,
+                false           // keep_max_size_level0 (usually false for standard build)
+            );
+        }
+    }
+
+    // cleanup locks
+    for (int i = 0; i < ntotal; i++) {
+        omp_destroy_lock(&locks[i]);
+    }
+}
+
 void IndexHNSW::add(idx_t n, const float* x) {
     FAISS_THROW_IF_NOT_MSG(
             storage,
@@ -343,6 +426,48 @@ void IndexHNSW::add(idx_t n, const float* x) {
     ntotal = storage->ntotal;
 
     hnsw_add_vertices(*this, n0, n, x, verbose, hnsw.levels.size() == ntotal);
+    hnsw.print_neighbor_stats(0);
+    
+    // --- pruning logic starts ---
+    set_hub_nodes(hnsw, ntotal);
+
+    // create copy index
+    // sets assign_probas, cum_nneigbor_per_level
+    HNSW copy_hnsw(32);
+
+    // copy levels, offsets, neighbors
+    copy_hnsw.levels = hnsw.levels;
+    copy_hnsw.offsets = hnsw.offsets;
+    copy_hnsw.neighbors = hnsw.neighbors;
+
+    // copy all other fields - just in case
+    copy_hnsw.entry_point = hnsw.entry_point;
+    copy_hnsw.max_level = hnsw.max_level;
+    copy_hnsw.efConstruction = hnsw.efConstruction;
+    copy_hnsw.efSearch = hnsw.efSearch;
+    copy_hnsw.check_relative_distance = hnsw.check_relative_distance;
+    copy_hnsw.search_bounded_queue = hnsw.search_bounded_queue;
+    copy_hnsw.rng = hnsw.rng;
+
+    // clear L0 neighbors
+    copy_hnsw.clear_neighbor_tables(0);
+
+    pruning.to_prune = true;
+
+    // rebuild l0 for copy hnsw in pruned manner
+    hnsw_rebuild_l0(*this, copy_hnsw, n0, n, x);
+
+    pruning.to_prune = false;
+
+    // copy L0 link structure from copy_hnsw to orig_hnsw
+    for (int i = 0; i < ntotal; i++) {
+        size_t begin, end;
+        copy_hnsw.neighbor_range(i, 0, &begin, &end);
+        for (size_t j = begin; j < end; j++) {
+            hnsw.neighbors[j] = copy_hnsw.neighbors[j];
+        }
+    }
+
     hnsw.print_neighbor_stats(0);
 }
 

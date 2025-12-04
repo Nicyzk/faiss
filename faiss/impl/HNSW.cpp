@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "HNSW.h"
 #include <faiss/impl/HNSW.h>
 
 #include <cstddef>
@@ -23,6 +24,7 @@
 #endif
 
 namespace faiss {
+Pruning pruning;
 
 /**************************************************************
  * HNSW structure implementation
@@ -528,6 +530,13 @@ void HNSW::add_links_starting_from(
 
     // but we can afford only this many neighbors
     int M = nb_neighbors(level);
+
+    if (pruning.to_prune) {
+        if (pruning.is_hub_node[pt_id])
+            M = pruning.M;
+        else
+            M = pruning.m;
+    }
 
     ::faiss::shrink_neighbor_list(ptdis, link_targets, M, keep_max_size_level0);
 
