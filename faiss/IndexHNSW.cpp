@@ -262,6 +262,11 @@ void hnsw_search(
     idx_t check_period = InterruptCallback::get_period_hint(
             hnsw.max_level * index->d * efSearch);
 
+    if (leann_search.to_leann_search)
+        printf("WE ARE LEANN SEARCHING\n");
+    else
+        printf("NOT LEANN SEARCHING?\n");
+
     for (idx_t i0 = 0; i0 < n; i0 += check_period) {
         idx_t i1 = std::min(i0 + check_period, n);
 
@@ -279,8 +284,8 @@ void hnsw_search(
                 dis->set_query(x + i * index->d);
 
                 if (leann_search.to_leann_search) {
-                    leann_query = x + i * index->d;
-                    leann_index_d = d;
+                    leann_query = (float *)(x + i * index->d);
+                    leann_index_d = index->d;
                 }
 
                 HNSWStats stats = hnsw.search(*dis, res, vt, params);

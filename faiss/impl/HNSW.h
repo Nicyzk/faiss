@@ -244,7 +244,7 @@ struct HNSW {
 
 /* LEANN PARAMETERS */
 struct LeannSearch {
-    bool to_leann_search = false;
+    bool to_leann_search = true;
     float alpha = 0.1;
 };
 

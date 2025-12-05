@@ -15,6 +15,7 @@
 #include <faiss/impl/IDSelector.h>
 #include <faiss/impl/ResultHandler.h>
 #include <faiss/utils/prefetch.h>
+#include <faiss/utils/distances.h>
 
 #ifdef __AVX2__
 #include <immintrin.h>
@@ -678,7 +679,7 @@ int leann_search_from_candidates(
         int v0 = leann_exact_queue.pop_min(&d0_exact);
 
         // if distance (v, q) > distance (f, q) then break
-        if (d0_exact > res.threshold && nres >= res.k) {
+        if (d0_exact > res.threshold) {
             break;
         }
 
@@ -754,8 +755,11 @@ int leann_search_from_candidates(
             float d0_approx = 0;
             int m0 = candidates.pop_min(&d0_approx); // we don't use d0_approx
 
-            const float *embedding = recompute_embedding(m0);
+            // const float *embedding = recompute_embedding(m0);
+            float* embedding = (float*) malloc(leann_index_d * sizeof(float));
+            memset(embedding, 0, leann_index_d * sizeof(float));
             float d_exact = fvec_L2sqr(leann_query, embedding, leann_index_d);
+            free(embedding);
 
             // same logic as add_to_heap but we add to exact queue
             if (!sel || sel->is_member(m0)) {
