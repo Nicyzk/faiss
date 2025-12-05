@@ -278,6 +278,11 @@ void hnsw_search(
                 res.begin(i);
                 dis->set_query(x + i * index->d);
 
+                if (leann_search.to_leann_search) {
+                    leann_query = x + i * index->d;
+                    leann_index_d = d;
+                }
+
                 HNSWStats stats = hnsw.search(*dis, res, vt, params);
                 n1 += stats.n1;
                 n2 += stats.n2;

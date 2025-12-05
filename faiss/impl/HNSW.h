@@ -242,6 +242,18 @@ struct HNSW {
     void permute_entries(const idx_t* map);
 };
 
+/* LEANN PARAMETERS */
+struct LeannSearch {
+    bool to_leann_search = false;
+    float alpha = 0.1;
+};
+
+extern LeannSearch leann_search;
+extern thread_local HNSW::MinimaxHeap leann_exact_queue;
+extern thread_local float* leann_query;
+extern thread_local int leann_index_d;
+/* END OF LEANN PARAMETERS */
+
 struct HNSWStats {
     size_t n1 = 0; /// number of vectors searched
     size_t n2 =
