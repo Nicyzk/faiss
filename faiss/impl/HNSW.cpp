@@ -17,6 +17,8 @@
 #include <faiss/utils/prefetch.h>
 #include <faiss/utils/distances.h>
 
+#include <algorithm>
+#include <unordered_map>
 #ifdef __AVX2__
 #include <immintrin.h>
 
@@ -753,7 +755,7 @@ int leann_search_from_candidates(
         }
 
         // M ← extract top a% from candidates (AQ) that are not in EQ
-        size_t limit = std::max(0, candidates.size() * (double)leann_search.alpha);
+        size_t limit = std::max(0.0, candidates.size() * (double)leann_search.alpha);
 
         for (size_t j=0; j<limit; j++) {
             float d0_approx = 0;

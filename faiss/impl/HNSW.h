@@ -279,7 +279,7 @@ struct LeannMappedEmbeddings {
         data_ptr = static_cast<float*>(map);
         
         // Performance Hint: Tell OS we will access this randomly
-        madvise(map, file_size, MAD_RANDOM);
+        madvise(map, file_size, MADV_RANDOM);
     }
 
     ~LeannMappedEmbeddings() {
