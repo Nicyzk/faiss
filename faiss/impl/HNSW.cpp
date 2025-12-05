@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "HNSW.h"
 #include <faiss/impl/HNSW.h>
 
 #include <cstddef>
@@ -23,6 +24,10 @@
 #endif
 
 namespace faiss {
+LeannSearch leann_search;
+thread_local HNSW::MinimaxHeap leann_exact_queue(64);
+thread_local float* leann_query;
+thread_local int leann_index_d;
 
 /**************************************************************
  * HNSW structure implementation
@@ -613,6 +618,168 @@ void HNSW::add_with_locks(
 using MinimaxHeap = HNSW::MinimaxHeap;
 using Node = HNSW::Node;
 using C = HNSW::C;
+
+/** LEANN SEARCH */
+int leann_search_from_candidates(
+        const HNSW& hnsw,
+        DistanceComputer& qdis,
+        ResultHandler<C>& res,
+        MinimaxHeap& candidates,
+        VisitedTable& vt,
+        HNSWStats& stats,
+        int level,
+        int nres_in,
+        const SearchParameters* params
+) {
+    int nres = nres_in;
+    int ndis = 0;
+
+    // can be overridden by search params
+    bool do_dis_check = hnsw.check_relative_distance;
+    int efSearch = hnsw.efSearch;
+    const IDSelector* sel = nullptr;
+    if (params) {
+        if (const SearchParametersHNSW* hnsw_params =
+                    dynamic_cast<const SearchParametersHNSW*>(params)) {
+            do_dis_check = hnsw_params->check_relative_distance;
+            efSearch = hnsw_params->efSearch;
+        }
+        sel = params->sel;
+    }
+
+    // should only add the 1 element in EQ to result set
+    C::T threshold = res.threshold;
+    for (int i = 0; i < leann_exact_queue.size(); i++) {
+        idx_t v1 = leann_exact_queue.ids[i];
+        float d = leann_exact_queue.dis[i];
+        FAISS_ASSERT(v1 >= 0);
+        if (!sel || sel->is_member(v1)) {
+            if (d < threshold) {
+                if (res.add_result(d, v1)) {
+                    threshold = res.threshold;
+                }
+            }
+        }
+        vt.set(v1);
+    }
+
+    int nstep = 0;
+
+    while (leann_exact_queue.size() > 0) {
+        float d0_exact = 0;
+        int v0 = leann_exact_queue.pop_min(&d0_exact);
+
+        // if distance (v, q) > distance (f, q) then break
+        if (d0_exact > res.threshold && nres >= res.k) {
+            break;
+        }
+
+        size_t begin, end;
+        hnsw.neighbor_range(v0, level, &begin, &end);
+
+        // a faster version: reference version in unit test test_hnsw.cpp
+        // the following version processes 4 neighbors at a time
+        size_t jmax = begin;
+        for (size_t j = begin; j < end; j++) {
+            int v1 = hnsw.neighbors[j];
+            if (v1 < 0) {
+                break;
+            }
+
+            prefetch_L2(vt.visited.data() + v1);
+            jmax += 1;
+        }
+
+        int counter = 0;
+        size_t saved_j[4];
+
+        threshold = res.threshold;
+
+        // only do AQ ← AQ ∪ {n}. do NOT add into result set, only EQ adds to result set
+        auto add_to_heap = [&](const size_t idx, const float dis) {
+            candidates.push(idx, dis);
+        };
+
+        // for each n in neighbors(v0):
+        //     if n not visited, a) mark n visited b) do approx distance c) AQ ← AQ ∪ {n}
+        for (size_t j = begin; j < jmax; j++) {
+            int v1 = hnsw.neighbors[j];
+
+            bool vget = vt.get(v1);
+            vt.set(v1);
+            saved_j[counter] = v1;
+            counter += vget ? 0 : 1;
+
+            if (counter == 4) {
+                float dis[4];
+                qdis.distances_batch_4(
+                        saved_j[0],
+                        saved_j[1],
+                        saved_j[2],
+                        saved_j[3],
+                        dis[0],
+                        dis[1],
+                        dis[2],
+                        dis[3]);
+
+                for (size_t id4 = 0; id4 < 4; id4++) {
+                    add_to_heap(saved_j[id4], dis[id4]);
+                }
+
+                ndis += 4;
+
+                counter = 0;
+            }
+        }
+
+        for (size_t icnt = 0; icnt < counter; icnt++) {
+            float dis = qdis(saved_j[icnt]);
+            add_to_heap(saved_j[icnt], dis);
+
+            ndis += 1;
+        }
+
+        // M ← extract top a% from candidates (AQ) that are not in EQ
+        size_t limit = std::max(1.0, candidates.size() * (double)leann_search.alpha);
+
+        for (size_t j=0; j<limit; j++) {
+            float d0_approx = 0;
+            int m0 = candidates.pop_min(&d0_approx); // we don't use d0_approx
+
+            const float *embedding = recompute_embedding(m0);
+            float d_exact = fvec_L2sqr(leann_query, embedding, leann_index_d);
+
+            // same logic as add_to_heap but we add to exact queue
+            if (!sel || sel->is_member(m0)) {
+                if (d_exact < threshold) {
+                    if (res.add_result(d_exact, m0)) {
+                        threshold = res.threshold;
+                        nres += 1;
+                    }
+                }
+            }
+            leann_exact_queue.push(m0, d_exact);
+        }
+
+        nstep++;
+        if (!do_dis_check && nstep > efSearch) {
+            break;
+        }
+    }
+
+    if (level == 0) {
+        stats.n1++;
+        if (candidates.size() == 0) {
+            stats.n2++;
+        }
+        stats.ndis += ndis;
+        stats.nhops += nstep;
+    }
+
+    return nres;
+}
+/** END OF LEANN SEARCH */
+
 /** Do a BFS on the candidates list */
 int search_from_candidates(
         const HNSW& hnsw,
@@ -994,10 +1161,17 @@ HNSWStats HNSW::search(
     if (bounded_queue) { // this is the most common branch
         MinimaxHeap candidates(ef);
 
-        candidates.push(nearest, d_nearest);
-
-        search_from_candidates(
+        if (leann_search.to_leann_search) {
+            leann_exact_queue.push(nearest, d_nearest);
+            leann_search_from_candidates(
                 *this, qdis, res, candidates, vt, stats, 0, 0, params);
+        } else {
+            // normal flow
+            candidates.push(nearest, d_nearest);
+
+            search_from_candidates(
+                *this, qdis, res, candidates, vt, stats, 0, 0, params);
+        }        
     } else {
         std::priority_queue<Node> top_candidates =
                 search_from_candidate_unbounded(

@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include "faiss/Index.h"
+#include "impl/HNSW.h"
 
 #include <faiss/Index2Layer.h>
 #include <faiss/IndexFlat.h>
@@ -275,6 +276,11 @@ void hnsw_search(
             for (idx_t i = i0; i < i1; i++) {
                 res.begin(i);
                 dis->set_query(x + i * index->d);
+
+                if (leann_search.to_leann_search) {
+                    leann_query = x + i * index->d;
+                    leann_index_d = d;
+                }
 
                 HNSWStats stats = hnsw.search(*dis, res, vt, params);
                 n1 += stats.n1;
