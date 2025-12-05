@@ -10,6 +10,11 @@
 #include <queue>
 #include <unordered_set>
 #include <vector>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <iostream>
 
 #include <omp.h>
 
@@ -24,8 +29,8 @@ namespace faiss {
 
 struct Pruning {
     bool to_prune = false;
-    int M = 32;
-    int m = 16;
+    int M = 64;
+    int m = 32;
     float alpha = 0.1f;
     std::vector<bool> is_hub_node;
 };
@@ -243,6 +248,56 @@ struct HNSW {
 };
 
 /* LEANN PARAMETERS */
+struct LeannMappedEmbeddings {
+    int fd;
+    size_t file_size;
+    float* data_ptr; // Points to the mmap'd region
+    size_t dim;      // Dimensions per vector
+
+    LeannMappedEmbeddings(const char* filename, size_t d) : dim(d) {
+        fd = open(filename, O_RDONLY);
+        if (fd == -1) {
+            perror("Error opening embedding file");
+            exit(1);
+        }
+
+        struct stat sb;
+        if (fstat(fd, &sb) == -1) {
+            perror("Error getting file size");
+            exit(1);
+        }
+        file_size = sb.st_size;
+
+        // Map the file as read-only. 
+        // MAP_SHARED allows other processes to see it (standard for read-only).
+        void* map = mmap(NULL, file_size, PROT_READ, MAP_SHARED, fd, 0);
+        if (map == MAP_FAILED) {
+            perror("Error mmapping file");
+            exit(1);
+        }
+
+        data_ptr = static_cast<float*>(map);
+        
+        // Performance Hint: Tell OS we will access this randomly
+        madvise(map, file_size, MAD_RANDOM);
+    }
+
+    ~LeannMappedEmbeddings() {
+        if (data_ptr && data_ptr != MAP_FAILED) {
+            munmap(data_ptr, file_size);
+        }
+        if (fd != -1) {
+            close(fd);
+        }
+    }
+
+    // Returns a pointer to the i-th embedding directly in the OS page cache.
+    // Zero copies, zero mallocs.
+    inline const float* get(size_t i) const {
+        return data_ptr + (i * dim);
+    }
+};
+
 struct LeannSearch {
     bool to_leann_search = true;
     float alpha = 0.1;
@@ -252,6 +307,7 @@ extern LeannSearch leann_search;
 extern thread_local HNSW::MinimaxHeap leann_exact_queue;
 extern thread_local float* leann_query;
 extern thread_local int leann_index_d;
+extern LeannMappedEmbeddings embed_store;
 /* END OF LEANN PARAMETERS */
 
 struct HNSWStats {

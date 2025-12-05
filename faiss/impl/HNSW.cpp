@@ -30,6 +30,7 @@ LeannSearch leann_search;
 thread_local HNSW::MinimaxHeap leann_exact_queue(64);
 thread_local float* leann_query;
 thread_local int leann_index_d;
+LeannMappedEmbeddings embed_store("data/flat_embeddings.bin", 768);
 
 /**************************************************************
  * HNSW structure implementation
@@ -537,10 +538,13 @@ void HNSW::add_links_starting_from(
     int M = nb_neighbors(level);
 
     if (pruning.to_prune) {
-        if (pruning.is_hub_node[pt_id])
-            M = pruning.M;
-        else
-            M = pruning.m;
+        if (pruning.is_hub_node[pt_id]) {
+            if (level > 0) M = 2 * pruning.M;
+            else M = pruning.M;
+        } else {
+            if (level > 0) M = 2 * pruning.m;
+            else M = pruning.m;
+        }
     }
 
     ::faiss::shrink_neighbor_list(ptdis, link_targets, M, keep_max_size_level0);
@@ -749,17 +753,14 @@ int leann_search_from_candidates(
         }
 
         // M ← extract top a% from candidates (AQ) that are not in EQ
-        size_t limit = std::max(1.0, candidates.size() * (double)leann_search.alpha);
+        size_t limit = std::max(0, candidates.size() * (double)leann_search.alpha);
 
         for (size_t j=0; j<limit; j++) {
             float d0_approx = 0;
             int m0 = candidates.pop_min(&d0_approx); // we don't use d0_approx
 
-            // const float *embedding = recompute_embedding(m0);
-            float* embedding = (float*) malloc(leann_index_d * sizeof(float));
-            memset(embedding, 0, leann_index_d * sizeof(float));
+            const float* embedding = embed_store.get(m0);
             float d_exact = fvec_L2sqr(leann_query, embedding, leann_index_d);
-            free(embedding);
 
             // same logic as add_to_heap but we add to exact queue
             if (!sel || sel->is_member(m0)) {
