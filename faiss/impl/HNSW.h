@@ -251,10 +251,12 @@ struct HNSW {
 struct LeannMappedEmbeddings {
     int fd;
     size_t file_size;
-    float* data_ptr; // Points to the mmap'd region
+    const uint16_t* raw_ptr; // Points to raw 16-bit data
     size_t dim;      // Dimensions per vector
 
-    LeannMappedEmbeddings(const char* filename, size_t d) : dim(d) {
+    mutable std::vector<float> conversion_buffer;
+
+    LeannMappedEmbeddings(const char* filename, size_t d) : dim(d), conversion_buffer(d) {
         fd = open(filename, O_RDONLY);
         if (fd == -1) {
             perror("Error opening embedding file");
@@ -276,31 +278,53 @@ struct LeannMappedEmbeddings {
             exit(1);
         }
 
-        data_ptr = static_cast<float*>(map);
+        raw_ptr = static_cast<const uint16_t*>(map);
         
         // Performance Hint: Tell OS we will access this randomly
         madvise(map, file_size, MADV_RANDOM);
     }
 
     ~LeannMappedEmbeddings() {
-        if (data_ptr && data_ptr != MAP_FAILED) {
-            munmap(data_ptr, file_size);
+        if (raw_ptr) munmap((void*)raw_ptr, file_size);
+        if (fd != -1) close(fd);
+    }
+
+    // Helper: Upcast single FP16 to FP32
+    static float half_to_float(uint16_t h) {
+        uint32_t sign = (h >> 15) & 0x0001;
+        uint32_t exp  = (h >> 10) & 0x001f;
+        uint32_t mant = h & 0x03ff;
+        uint32_t f_bits;
+
+        if (exp == 0) {
+            f_bits = (mant == 0) ? (sign << 31) : (sign << 31) | (mant << 13); // Denormal/Zero
+        } else if (exp == 31) {
+            f_bits = (sign << 31) | 0x7f800000 | (mant << 13); // Inf/NaN
+        } else {
+            f_bits = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
         }
-        if (fd != -1) {
-            close(fd);
-        }
+        float result;
+        std::memcpy(&result, &f_bits, sizeof(result));
+        return result;
     }
 
     // Returns a pointer to the i-th embedding directly in the OS page cache.
     // Zero copies, zero mallocs.
-    inline const float* get(size_t i) const {
-        return data_ptr + (i * dim);
+    const float* get(size_t i) const {
+        const uint16_t* src = raw_ptr + (i * dim);
+        
+        // Convert the specific vector on demand
+        for (size_t j = 0; j < dim; j++) {
+            conversion_buffer[j] = half_to_float(src[j]);
+        }
+        
+        return conversion_buffer.data();
     }
 };
 
 struct LeannSearch {
     bool to_leann_search = true;
-    float alpha = 0.1;
+    float alpha = 0.5;
 };
 
 extern LeannSearch leann_search;

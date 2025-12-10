@@ -32,7 +32,7 @@ LeannSearch leann_search;
 thread_local HNSW::MinimaxHeap leann_exact_queue(64);
 thread_local float* leann_query;
 thread_local int leann_index_d;
-LeannMappedEmbeddings embed_store("data/flat_embeddings.bin", 768);
+LeannMappedEmbeddings embed_store("/mnt/local/yongye/faiss/scripts/embeddings.bin", 768);
 
 /**************************************************************
  * HNSW structure implementation
