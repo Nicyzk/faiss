@@ -541,11 +541,11 @@ void HNSW::add_links_starting_from(
 
     if (pruning.to_prune) {
         if (pruning.is_hub_node[pt_id]) {
-            if (level > 0) M = 2 * pruning.M;
-            else M = pruning.M;
+            if (level > 0) M = pruning.M;
+            else M = 2 * pruning.M;
         } else {
-            if (level > 0) M = 2 * pruning.m;
-            else M = pruning.m;
+            if (level > 0) M = pruning.m;
+            else M = 2 * pruning.m;
         }
     }
 
