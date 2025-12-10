@@ -254,9 +254,7 @@ struct LeannMappedEmbeddings {
     const uint16_t* raw_ptr; // Points to raw 16-bit data
     size_t dim;      // Dimensions per vector
 
-    mutable std::vector<float> conversion_buffer;
-
-    LeannMappedEmbeddings(const char* filename, size_t d) : dim(d), conversion_buffer(d) {
+    LeannMappedEmbeddings(const char* filename, size_t d) : dim(d) {
         fd = open(filename, O_RDONLY);
         if (fd == -1) {
             perror("Error opening embedding file");
@@ -311,14 +309,19 @@ struct LeannMappedEmbeddings {
     // Returns a pointer to the i-th embedding directly in the OS page cache.
     // Zero copies, zero mallocs.
     const float* get(size_t i) const {
-        const uint16_t* src = raw_ptr + (i * dim);
+        static thread_local std::vector<float> tl_buffer; 
         
-        // Convert the specific vector on demand
+        // Resize checks are cheap (happens only first time usually)
+        if (tl_buffer.size() != dim) {
+            tl_buffer.resize(dim);
+        }
+
+        const uint16_t* src = raw_ptr + (i * dim);
         for (size_t j = 0; j < dim; j++) {
-            conversion_buffer[j] = half_to_float(src[j]);
+            tl_buffer[j] = half_to_float(src[j]);
         }
         
-        return conversion_buffer.data();
+        return tl_buffer.data();
     }
 };
 
