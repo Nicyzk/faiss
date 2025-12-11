@@ -354,6 +354,17 @@ void add_link(
         bool keep_max_size_level0 = false) {
     size_t begin, end;
     hnsw.neighbor_range(src, level, &begin, &end);
+
+    if (pruning.to_prune) {
+        if (pruning.is_hub_node[src]) {
+            if (level > 0) end = begin + pruning.M;
+            else end = begin + 2 * pruning.M;
+        } else {
+            if (level > 0) end = begin + pruning.m;
+            else end = begin + 2 * pruning.m;
+        }
+    }
+
     if (hnsw.neighbors[end - 1] == -1) {
         // there is enough room, find a slot to add it
         size_t i = end;
@@ -773,6 +784,7 @@ int leann_search_from_candidates(
                     }
                 }
             }
+            FAISS_ASSERT(m0 >= 0);
             leann_exact_queue.push(m0, d_exact);
         }
 
@@ -1177,6 +1189,8 @@ HNSWStats HNSW::search(
         MinimaxHeap candidates(ef);
 
         if (leann_search.to_leann_search) {
+            leann_exact_queue.clear();
+            FAISS_ASSERT(nearest >= 0);
             leann_exact_queue.push(nearest, d_nearest);
             leann_search_from_candidates(
                 *this, qdis, res, candidates, vt, stats, 0, 0, params);

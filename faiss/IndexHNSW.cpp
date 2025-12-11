@@ -369,6 +369,67 @@ static void set_hub_nodes(HNSW &hnsw, size_t ntotal) {
     }
 }
 
+static bool validate_hnsw_integrity(const HNSW& hnsw, int ntotal) {
+    bool is_valid = true;
+
+    // Iterate over every node in the graph
+    for (int i = 0; i < ntotal; i++) {
+        
+        // Get the max level for this node
+        int max_level = hnsw.levels[i]; 
+
+        // Check every level for this node
+        for (int level = 1; level <= max_level; level++) {
+            size_t begin, end;
+            hnsw.neighbor_range(i, level, &begin, &end);
+
+            bool seen_minus_one = false;
+            
+            // Scan the neighbor list for this specific node and level
+            for (size_t j = begin; j < end; j++) {
+                int neighbor = hnsw.neighbors[j];
+
+                if (neighbor == -1) {
+                    seen_minus_one = true;
+                } else {
+                    // We found a valid neighbor ID...
+                    
+                    // CHECK 1: Did we see a -1 before this? (The "Hole" Check)
+                    if (seen_minus_one) {
+                        printf("CORRUPTION: Node %d at Level %d has a hole. "
+                               "Found valid neighbor %d after a -1 at index %zu.\n", 
+                               i, level, neighbor, j);
+                        is_valid = false;
+                    }
+
+                    // CHECK 2: Is the neighbor ID valid?
+                    if (neighbor < 0) {
+                         // This handles -2, -999, etc.
+                         printf("CORRUPTION: Node %d at Level %d has invalid neighbor ID %d.\n",
+                                i, level, neighbor);
+                         is_valid = false;
+                    }
+
+                    // CHECK 3: Is it out of bounds?
+                    if (neighbor >= ntotal) {
+                        printf("CORRUPTION: Node %d neighbors to %d, which is >= ntotal (%d)\n",
+                               i, neighbor, ntotal);
+                        is_valid = false;
+                    }
+                }
+            }
+        }
+    }
+
+    if (is_valid) {
+        printf("HNSW Index Integrity Check: PASSED\n");
+    } else {
+        printf("HNSW Index Integrity Check: FAILED\n");
+    }
+    
+    return is_valid;
+}
+
 void IndexHNSW::add(idx_t n, const float* x) {
     FAISS_THROW_IF_NOT_MSG(
             storage,
@@ -391,6 +452,9 @@ void IndexHNSW::add(idx_t n, const float* x) {
     pruning.to_prune = false;
 
     hnsw.print_neighbor_stats(0);
+    // --- pruning logic end ---
+
+    validate_hnsw_integrity(hnsw, ntotal);
 }
 
 void IndexHNSW::reset() {
