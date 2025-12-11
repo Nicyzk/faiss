@@ -435,25 +435,27 @@ void IndexHNSW::add(idx_t n, const float* x) {
             storage,
             "Please use IndexHNSWFlat (or variants) instead of IndexHNSW directly");
     FAISS_THROW_IF_NOT(is_trained);
-    int n0 = ntotal;
-    storage->add(n, x);
-    ntotal = storage->ntotal;
 
-    hnsw_add_vertices(*this, n0, n, x, verbose, hnsw.levels.size() == ntotal);
+    // we have 3 stages: initial adds -> reset & compute distribution -> pruned adds
+    if (hnsw.prune_state != 0) { // either initial adds or rest of prune adds
+        int n0 = ntotal;
+        storage->add(n, x);
+        ntotal = storage->ntotal;
+
+        hnsw_add_vertices(*this, n0, n, x, verbose, hnsw.levels.size() == ntotal);
+    } else {
+        // applies only to the first add instance in pruned adds
+        set_hub_nodes(hnsw, ntotal);
+        reset();
+        hnsw.prune_state = 1;
+
+        int n0 = ntotal;
+        storage->add(n, x);
+        ntotal = storage->ntotal;
+        hnsw_add_vertices(*this, n0, n, x, verbose, hnsw.levels.size() == ntotal);
+    }
+
     hnsw.print_neighbor_stats(0);
-    
-    // --- pruning logic starts ---
-    set_hub_nodes(hnsw, ntotal);
-
-    hnsw.reset();
-
-    pruning.to_prune = true;
-    hnsw_add_vertices(*this, n0, n, x, verbose, hnsw.levels.size() == ntotal);
-    pruning.to_prune = false;
-
-    hnsw.print_neighbor_stats(0);
-    // --- pruning logic end ---
-
     validate_hnsw_integrity(hnsw, ntotal);
 }
 

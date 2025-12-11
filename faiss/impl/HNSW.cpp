@@ -355,7 +355,7 @@ void add_link(
     size_t begin, end;
     hnsw.neighbor_range(src, level, &begin, &end);
 
-    if (pruning.to_prune) {
+    if (hnsw.prune_state >= 0) {
         if (pruning.is_hub_node[src]) {
             if (level > 0) end = begin + pruning.M;
             else end = begin + 2 * pruning.M;
@@ -550,7 +550,7 @@ void HNSW::add_links_starting_from(
     // but we can afford only this many neighbors
     int M = nb_neighbors(level);
 
-    if (pruning.to_prune) {
+    if (prune_state >= 0) {
         if (pruning.is_hub_node[pt_id]) {
             if (level > 0) M = pruning.M;
             else M = 2 * pruning.M;

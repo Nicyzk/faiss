@@ -28,7 +28,6 @@
 namespace faiss {
 
 struct Pruning {
-    bool to_prune = false;
     int M = 64;
     int m = 32;
     float alpha = 0.1f;
@@ -68,6 +67,8 @@ struct SearchParametersHNSW : SearchParameters {
 };
 
 struct HNSW {
+    int prune_state = -1; // -1 (initial adds) | 0 (first prune add) | (rest of prune adds)
+
     /// internal storage of vectors (32 bits: this is expensive)
     using storage_idx_t = int32_t;
 
