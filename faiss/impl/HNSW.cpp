@@ -32,7 +32,9 @@ LeannSearch leann_search;
 thread_local HNSW::MinimaxHeap leann_exact_queue(64);
 thread_local float* leann_query;
 thread_local int leann_index_d;
-LeannMappedEmbeddings embed_store("/mnt/local/yongye/faiss/scripts/embeddings.bin", 768);
+// LeannMappedEmbeddings embed_store("/mnt/local/yongye/faiss/scripts/leann_vanilla_embeddings.bin", 768);
+// LeannMappedEmbeddings embed_store("/mnt/local/yongye/faiss/sift1M/sift_base_fp16.bin", 128);
+LeannMappedEmbeddings embed_store("/mnt/local/yongye/faiss/scripts/wiki_subset.bin", 768);
 
 /**************************************************************
  * HNSW structure implementation
@@ -773,6 +775,7 @@ int leann_search_from_candidates(
             int m0 = candidates.pop_min(&d0_approx); // we don't use d0_approx
 
             const float* embedding = embed_store.get(m0);
+            stats.nrecomputed += 1;
             float d_exact = fvec_L2sqr(leann_query, embedding, leann_index_d);
 
             // same logic as add_to_heap but we add to exact queue

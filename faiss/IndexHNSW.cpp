@@ -258,6 +258,7 @@ void hnsw_search(
         }
     }
     size_t n1 = 0, n2 = 0, ndis = 0, nhops = 0;
+    size_t nrecomputed = 0;
 
     idx_t check_period = InterruptCallback::get_period_hint(
             hnsw.max_level * index->d * efSearch);
@@ -278,7 +279,7 @@ void hnsw_search(
             std::unique_ptr<DistanceComputer> dis(
                     storage_distance_computer(index->storage));
 
-#pragma omp for reduction(+ : n1, n2, ndis, nhops) schedule(guided)
+#pragma omp for reduction(+ : n1, n2, ndis, nhops, nrecomputed) schedule(guided)
             for (idx_t i = i0; i < i1; i++) {
                 res.begin(i);
                 dis->set_query(x + i * index->d);
@@ -293,13 +294,17 @@ void hnsw_search(
                 n2 += stats.n2;
                 ndis += stats.ndis;
                 nhops += stats.nhops;
+
+                nrecomputed += stats.nrecomputed;
+                
                 res.end();
             }
         }
         InterruptCallback::check();
     }
 
-    hnsw_stats.combine({n1, n2, ndis, nhops});
+    hnsw_stats.combine({n1, n2, ndis, nhops, nrecomputed});
+    printf("Total nodes recomputed for this search: %zu\n", nrecomputed);
 }
 
 } // anonymous namespace
@@ -456,7 +461,7 @@ void IndexHNSW::add(idx_t n, const float* x) {
     }
 
     hnsw.print_neighbor_stats(0);
-    validate_hnsw_integrity(hnsw, ntotal);
+    // validate_hnsw_integrity(hnsw, ntotal);
 }
 
 void IndexHNSW::reset() {

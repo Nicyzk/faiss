@@ -1,44 +1,44 @@
 import numpy as np
 import faiss
+import json
+import time
+from compute_wiki_recall import compute_recall_against_gt
 
-# def ivecs_read(fname):
-#     a = np.fromfile(fname, dtype="int32")
-#     d = a[0]
-#     return a.reshape(-1, d + 1)[:, 1:].copy()
-
-# def fvecs_read(fname):
-#     return ivecs_read(fname).view('float32')
-
-# print("load data")
-
-# xt = fvecs_read("../sift1M/sift_learn.fvecs")
-# xb = fvecs_read("../sift1M/sift_base.fvecs")
-# xq = fvecs_read("../sift1M/sift_query.fvecs")
-# d = xt.shape[1]
-
-# print("load GT")
-
-# gt = ivecs_read("../sift1M/sift_groundtruth.ivecs")
-# gt = gt.astype('int64') # note: cast in numpy has different meaning from cast in C!
-# k = gt.shape[1]
+emb = np.load("wiki_subset.npy")
+query = np.load("wiki_query.npy")
 
 # print("prepare criterion")
 
-emb = np.load("embeddings.npy")
-
 # Retrieve HNSW stats
-index_key = "HNSW64,PQ32"
-index = faiss.index_factory(d, index_key)
+# index_key = "HNSW64,PQ32"
+index_key = "HNSW64"
+# index_key = "IVF4096,Flat"
+index = faiss.index_factory(768, index_key)
 
 # index.train(xt)
 # index.add(xb)
 index.train(emb)
-index.add(emb[:9])
+index.add(emb)
+
+# index.hnsw.prune_state = 0
+# index.add(emb)
 
 print("done add")
 
 # k=gt.shape[1]
 
-D, I = index.search(emb[:5], 10) # sanity check
-print(I)
-print(D)
+t0 = time.time()
+D, I = index.search(query, 10) # sanity check
+latency = time.time() - t0
+# print(I)
+# print(D)
+
+print(f"{latency:.3f}")
+
+# results_list = I.tolist()
+# recall = compute_recall_against_gt(results_list)
+# print(f"{latency:.3f}, {recall:.3f}")
+
+
+# with open("ivf_wiki.json", "w") as f:
+#     json.dump(results_list, f)

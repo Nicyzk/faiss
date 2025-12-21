@@ -29,8 +29,8 @@ namespace faiss {
 
 struct Pruning {
     int M = 64;
-    int m = 32;
-    float alpha = 0.1f;
+    int m = 20;
+    float alpha = 0.35f;
     std::vector<bool> is_hub_node;
 };
 
@@ -328,7 +328,7 @@ struct LeannMappedEmbeddings {
 
 struct LeannSearch {
     bool to_leann_search = true;
-    float alpha = 0.5;
+    float alpha = 0.9;
 };
 
 extern LeannSearch leann_search;
@@ -345,10 +345,13 @@ struct HNSWStats {
     size_t ndis = 0;  /// number of distances computed
     size_t nhops = 0; /// number of hops aka number of edges traversed
 
+    size_t nrecomputed = 0; // total number of recomputed embeddings
+
     void reset() {
         n1 = n2 = 0;
         ndis = 0;
         nhops = 0;
+        nrecomputed = 0;
     }
 
     void combine(const HNSWStats& other) {
@@ -356,6 +359,7 @@ struct HNSWStats {
         n2 += other.n2;
         ndis += other.ndis;
         nhops += other.nhops;
+        nrecomputed += other.nrecomputed;
     }
 };
 
